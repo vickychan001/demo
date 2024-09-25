@@ -33,8 +33,6 @@ permission_classes=(permissions.AllowAny,),
 )
 
 urlpatterns = [
-    path('dj-rest-auth/', include('dj_rest_auth.urls')),
-    path('dj-rest-auth/registration/', include('dj_rest_auth.registration.urls')),
     path('accounts/', include('allauth.urls')),
     path('', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

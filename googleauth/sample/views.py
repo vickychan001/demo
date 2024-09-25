@@ -1,50 +1,94 @@
-from django.shortcuts import render
-
-# Create your views here.
 import requests
-from django.contrib.auth import get_user_model
-from rest_framework.views import APIView
+from django.conf import settings
+from django.contrib.auth.models import User
+from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.authtoken.models import Token
+from .serializers import *
 from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
 
-User = get_user_model()
-
-class GoogleLoginView(APIView):
-    @swagger_auto_schema(
-        operation_description="Google OAuth login",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                'token': openapi.Schema(type=openapi.TYPE_STRING, description='Google OAuth Token'),
-            },
-            required=['token'],
-        ),
-        responses={200: "Success", 400: "Bad Request"}
+@api_view(['GET'])
+def google_login(request):
+    """
+    Redirect the user to the Google OAuth 2.0 authorization endpoint.
+    """
+    google_auth_url = (
+        'https://accounts.google.com/o/oauth2/auth?'
+        'response_type=code&'
+        f'client_id={settings.GOOGLE_CLIENT_ID}&'
+        f'redirect_uri={settings.GOOGLE_REDIRECT_URI}&'
+        'scope=email%20profile'
     )
-    def post(self, request):
-        token = request.data.get("token", None)
-        if token is None:
-            return Response({"error": "Token not provided"}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'auth_url': google_auth_url})
 
-        # Verify token with Google
-        google_verify_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={token}"
-        response = requests.get(google_verify_url)
+@swagger_auto_schema(
+    method='post',
+    request_body=GoogleCallbackSerializer,
+    responses={
+        200: GoogleCallbackResponseSerializer,
+        400: 'Bad Request - Invalid or missing authorization code',
+    },
+    operation_description="Exchange authorization code for an access token and authenticate the user"
+)
+@api_view(['POST'])
+def google_callback(request):
+    """
+    Handle the callback from Google OAuth after the user authorizes the app.
+    Exchange the authorization code for an access token and authenticate the user.
+    """
+    code = request.data.get('code')
 
-        if response.status_code != 200:
-            return Response({"error": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST)
+    # Exchange the authorization code for an access token
+    token_url = 'https://oauth2.googleapis.com/token'
+    token_data = {
+        'code': code,
+        'client_id': settings.GOOGLE_CLIENT_ID,
+        'client_secret': settings.GOOGLE_CLIENT_SECRET,
+        'redirect_uri': settings.GOOGLE_REDIRECT_URI,
+        'grant_type': 'authorization_code'
+    }
+    token_response = requests.post(token_url, data=token_data)
 
-        google_data = response.json()
+    if token_response.status_code != 200:
+        return Response({'error': 'Failed to fetch access token from Google.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Process the returned data
-        email = google_data.get('email')
-        name = google_data.get('name')
+    token_json = token_response.json()
+    access_token = token_json.get('access_token')
 
-        # Authenticate or create user
-        user, created = User.objects.get_or_create(email=email, defaults={"username": name})
-        token, _ = Token.objects.get_or_create(user=user)
+    # Use the access token to fetch user information from Google
+    userinfo_url = 'https://www.googleapis.com/oauth2/v1/userinfo'
+    userinfo_response = requests.get(userinfo_url, params={'access_token': access_token})
 
-        return Response({"token": token.key, "user": user.username}, status=status.HTTP_200)
+    if userinfo_response.status_code != 200:
+        return Response({'error': 'Failed to fetch user information from Google.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    userinfo = userinfo_response.json()
+    email = userinfo.get('email')
+    first_name = userinfo.get('given_name')
+    last_name = userinfo.get('family_name')
+
+    # Check if the user already exists, otherwise create a new user
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        user = User.objects.create(
+            username=email,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        user.set_unusable_password()  # Since they're logging in via Google, no password is set.
+        user.save()
+
+    # Generate or retrieve authentication token for the user
+    token, created = Token.objects.get_or_create(user=user)
+
+    return Response({
+        'token': token.key,
+        'user': {
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name
+        }
+    })

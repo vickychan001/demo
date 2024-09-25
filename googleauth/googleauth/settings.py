@@ -66,6 +66,7 @@ SOCIALACCOUNT_PROVIDERS = {
             'client_id': '1017293777158-vdlbocrgdrquc59ncg3bjherir44jbs8.apps.googleusercontent.com',
             'secret': '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',
         },
+        
         'SCOPE': [
             'profile',
             'email',
@@ -76,6 +77,13 @@ SOCIALACCOUNT_PROVIDERS = {
         'OAUTH_PKCE_ENABLED': True,
     }
 }
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = '1017293777158-vdlbocrgdrquc59ncg3bjherir44jbs8.apps.googleusercontent.com'
+GOOGLE_CLIENT_SECRET = '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'
+GOOGLE_REDIRECT_URI = 'http://localhost:8000/accounts/google/login/callback/'
+
+FRONTEND_URL = 'http://localhost:3000'  
 
 SWAGGER_SETTINGS = {
     'USE_SESSION_AUTH': False,
